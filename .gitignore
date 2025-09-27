@@ -1,0 +1,34 @@
+.anchor
+.DS_Store
+target
+**/*.rs.bk
+node_modules
+test-ledger
+.yarn
+
+
+# Rust / Cargo
+/target
+Cargo.lock
+**/*.rs.bk
+
+# Solana build artifacts
+**/dist
+**/keys
+**/.anchor
+**/idl/*.json
+.mr-environments
+
+# Logs
+*.log
+
+# Node (Anchor uses Node for testing sometimes)
+node_modules
+yarn.lock
+package-lock.json
+
+# OS / Editor files
+.DS_Store
+*.swp
+.idea
+.vscode
