@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
 use std::str::FromStr;
-use shakmaty::uci::UciMove;
-use shakmaty::{Chess, Position, CastlingMode};
-use shakmaty::fen::Fen;
 
 
 declare_id!("DNZxPFmGYe8K17RQ4g2VaAcasvBwGUeq8CYLDshCDGnB");
@@ -29,37 +26,62 @@ pub mod contract {
         Ok(())
     }
 
-    pub fn make_move(ctx: Context<MakeMove>, move_uci: String) -> Result<()> {
-        let game = &mut ctx.accounts.game;
-        let player_index = game.turn - 1;
-        require_keys_eq!(game.players[player_index as usize], ctx.accounts.player.key(), ChessError::NotPlayerTurn);
-        require!(game.state == GameState::Active || game.state == GameState::Check, ChessError::GameNotActive);
+    // pub fn make_move(ctx: Context<MakeMove>, move_uci: String) -> Result<()> {
+    //     let game = &mut ctx.accounts.game;
+    //     let player_index = game.turn - 1;
+    //     require_keys_eq!(game.players[player_index as usize], ctx.accounts.player.key(), ChessError::NotPlayerTurn);
+    //     require!(game.state == GameState::Active || game.state == GameState::Check, ChessError::GameNotActive);
 
-        let mut chess_pos: Chess = Fen::from_str(&game.board).unwrap().into_position(CastlingMode::Standard).unwrap();
+    //     let mut chess_pos: Chess = Fen::from_str(&game.board).unwrap().into_position(CastlingMode::Standard).unwrap();
         
-        // UPDATED: Parse the move from UCI format (e.g. "e2e4")
-        let uci_move = UciMove::from_ascii(move_uci.as_bytes())
-            .map_err(|_| ChessError::InvalidMoveFormat)?;
+    //     // UPDATED: Parse the move from UCI format (e.g. "e2e4")
+    //     let uci_move = UciMove::from_ascii(move_uci.as_bytes())
+    //         .map_err(|_| ChessError::InvalidMoveFormat)?;
 
-        let mv = uci_move.to_move(&chess_pos)
-            .map_err(|_| ChessError::IllegalMove)?;
+    //     let mv = uci_move.to_move(&chess_pos)
+    //         .map_err(|_| ChessError::IllegalMove)?;
 
-        require!(chess_pos.is_legal(&mv), ChessError::IllegalMove);
-        chess_pos.play_unchecked(&mv);
-        game.board = Fen::from_position(chess_pos.clone(), shakmaty::EnPassantMode::Legal).to_string();
-        game.turn = if game.turn == 1 { 2 } else { 1 };
+    //     require!(chess_pos.is_legal(&mv), ChessError::IllegalMove);
+    //     chess_pos.play_unchecked(&mv);
+    //     game.board = Fen::from_position(chess_pos.clone(), shakmaty::EnPassantMode::Legal).to_string();
+    //     game.turn = if game.turn == 1 { 2 } else { 1 };
 
-        let color = if game.turn == 1 {shakmaty::Color::White} else {shakmaty::Color::Black};
+    //     let color = if game.turn == 1 {shakmaty::Color::White} else {shakmaty::Color::Black};
 
-        if chess_pos.is_checkmate() {
-            game.state = GameState::Checkmate { winner: ctx.accounts.player.key() };
-        } else if chess_pos.is_stalemate() || chess_pos.has_insufficient_material(color) {
-            game.state = GameState::Draw;
-        } else if chess_pos.is_check() {
-            game.state = GameState::Check;
-        } else {
-            game.state = GameState::Active;
-        }
+    //     if chess_pos.is_checkmate() {
+    //         game.state = GameState::Checkmate { winner: ctx.accounts.player.key() };
+    //     } else if chess_pos.is_stalemate() || chess_pos.has_insufficient_material(color) {
+    //         game.state = GameState::Draw;
+    //     } else if chess_pos.is_check() {
+    //         game.state = GameState::Check;
+    //     } else {
+    //         game.state = GameState::Active;
+    //     }
+    //     Ok(())
+    // }
+
+
+     // NEW: Function to settle the game and determine the winner
+    pub fn report_game_result(ctx: Context<SettleGame>, winner: Pubkey) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        
+        // --- Security Checks ---
+        // 1. Ensure the game is actually active and not already finished.
+        require!(game.state == GameState::Active, ChessError::GameNotActive);
+        
+        // 2. Ensure the person reporting the result is one of the players.
+        let reporter = ctx.accounts.player.key();
+        require!(game.players.contains(&reporter), ChessError::NotAPlayer);
+
+        // 3. Ensure the declared winner is also one of the players.
+        require!(game.players.contains(&winner), ChessError::NotAPlayer);
+
+        // --- State Update ---
+        game.state = GameState::Finished { winner };
+
+        // In a real application, you would add logic here to transfer the stake_amount
+        // from a vault account to the winner's account.
+
         Ok(())
     }
 }
@@ -81,12 +103,20 @@ pub struct JoinGame<'info> {
     pub player_two: Signer<'info>,
 }
 
+// NEW: Context for the settlement instruction
 #[derive(Accounts)]
-pub struct MakeMove<'info>{
+pub struct SettleGame<'info> {
     #[account(mut)]
-    pub game : Account<'info , Game>,
-    pub player : Signer<'info>,
+    pub game: Account<'info, Game>,
+    pub player: Signer<'info>,
 }
+
+// #[derive(Accounts)]
+// pub struct MakeMove<'info>{
+//     #[account(mut)]
+//     pub game : Account<'info , Game>,
+//     pub player : Signer<'info>,
+// }
 
 #[account]
 pub struct Game {
@@ -97,20 +127,18 @@ pub struct Game {
     pub stake_amount: u64,
 }
 
+// UPDATED: Simplified GameState enum
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum GameState {
     Pending,
     Active,
-    Check,
-    Checkmate { winner: Pubkey },
+    Finished { winner: Pubkey },
     Draw,
 }
 
 #[error_code]
 pub enum ChessError {
-    NotPlayerTurn,
-    IllegalMove,
     GameNotActive,
-    InvalidMoveFormat,
-    NotPlayerTwo
+    NotPlayerTwo,
+    NotAPlayer, // Added this required error
 }
